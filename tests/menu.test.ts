@@ -35,6 +35,42 @@ describe("menu filtering and recommendations", () => {
     expect(recommendations.some((item) => item.id === "crispy-rice-bowl")).toBe(false);
   });
 
+  it("treats allergen-like avoid ingredients as meaningful filters", () => {
+    const constraints = { ...baseConstraints, avoidIngredients: ["sesame"] };
+    const warnings = getItemWarnings(getMenuItemById("shroomami")!, constraints);
+    const recommendations = recommendItems(constraints, "vegetarian meal", 20);
+
+    expect(warnings.join(" ")).toContain("sesame");
+    expect(recommendations.some((item) => item.id === "shroomami")).toBe(false);
+    expect(recommendations.every((item) => !item.allergens.includes("sesame"))).toBe(true);
+  });
+
+  it("updates recommendations from active dietary filters without requiring typed query text", () => {
+    const vegetarian = recommendItems({ ...baseConstraints, dietaryPrefs: ["vegetarian"] }, "", 4);
+    const spicy = recommendItems({ ...baseConstraints, dietaryPrefs: ["spicy"] }, "", 4);
+    const highProtein = recommendItems({ ...baseConstraints, dietaryPrefs: ["highProtein"], nutritionGoal: "highProtein" }, "", 4);
+    const lowerCalorie = recommendItems({ ...baseConstraints, dietaryPrefs: ["lowerCalorie"], nutritionGoal: "lowerCalorie" }, "", 4);
+
+    expect(vegetarian.every((item) => item.dietaryFlags.includes("vegetarian") || item.dietaryFlags.includes("vegan"))).toBe(true);
+    expect(spicy.every((item) => item.dietaryFlags.includes("spicy"))).toBe(true);
+    expect(highProtein.every((item) => item.dietaryFlags.includes("highProtein") || item.nutrition.protein >= 30)).toBe(true);
+    expect(lowerCalorie.every((item) => item.dietaryFlags.includes("lowerCalorie") || item.nutrition.calories <= 650)).toBe(true);
+  });
+
+  it("does not label impossible filter combinations as matches", () => {
+    const constraints: CustomerConstraints = {
+      ...baseConstraints,
+      avoidIngredients: ["sesame"],
+      dietaryPrefs: ["vegetarian", "spicy", "highProtein"],
+      nutritionGoal: "highProtein",
+    };
+    const recommendations = recommendItems(constraints, "", 4);
+    const answer = buildDeterministicAnswer("What should I get?", constraints, []);
+
+    expect(recommendations).toHaveLength(0);
+    expect(answer.message).toContain("I do not see an exact Berkeley menu match");
+  });
+
   it("prioritizes high-protein requests", () => {
     const constraints = extractConstraintsFromText("I want high protein", baseConstraints);
     const recommendations = recommendItems(constraints, "high protein", 3);

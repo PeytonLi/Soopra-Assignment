@@ -27,6 +27,7 @@ import {
   formatNutrition,
   getItemWarnings,
   getMenuItemById,
+  isAllowedForConstraints,
   recommendItems,
 } from "@/lib/menu";
 import { buildPickupSummary, getCartTotals, type PickupSummary } from "@/lib/orders";
@@ -69,6 +70,37 @@ const defaultConstraints: CustomerConstraints = {
   nutritionGoal: "balanced",
 };
 
+const dietaryFilterLabels: Partial<Record<DietaryFlag, string>> = {
+  vegetarian: "vegetarian",
+  vegan: "vegan",
+  spicy: "spicy",
+  highProtein: "high-protein",
+  lowerCalorie: "lower-calorie",
+};
+
+function getNutritionGoalForPrefs(prefs: DietaryFlag[]): CustomerConstraints["nutritionGoal"] {
+  if (prefs.includes("highProtein")) return "highProtein";
+  if (prefs.includes("lowerCalorie")) return "lowerCalorie";
+  return "balanced";
+}
+
+function getActiveFilterLabels(constraints: CustomerConstraints) {
+  return [
+    ...constraints.allergens.map((allergen) => `no ${formatAllergen(allergen)}`),
+    ...constraints.avoidIngredients.map((ingredient) => `avoid ${ingredient}`),
+    ...constraints.dietaryPrefs.map((pref) => dietaryFilterLabels[pref]).filter((label): label is string => Boolean(label)),
+  ];
+}
+
+function buildRecommendationQuery(input: string, search: string, constraints: CustomerConstraints) {
+  const textParts = [input.trim(), search.trim()].filter(Boolean);
+  const filterParts = getActiveFilterLabels(constraints);
+  if (constraints.nutritionGoal === "highProtein" && !filterParts.includes("high-protein")) filterParts.push("high-protein");
+  if (constraints.nutritionGoal === "lowerCalorie" && !filterParts.includes("lower-calorie")) filterParts.push("lower-calorie");
+
+  return [...textParts, ...filterParts, "meal"].join(" ");
+}
+
 export function AssistantApp() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -91,17 +123,23 @@ export function AssistantApp() {
   const [pickupSummary, setPickupSummary] = useState<PickupSummary | null>(null);
   const [orderSaveState, setOrderSaveState] = useState<OrderSaveState>({ status: "idle" });
 
-  const recommendations = useMemo(() => recommendItems(constraints, input || search, 4), [constraints, input, search]);
+  const activeFilterLabels = useMemo(() => getActiveFilterLabels(constraints), [constraints]);
+  const recommendationQuery = useMemo(() => buildRecommendationQuery(input, search, constraints), [constraints, input, search]);
+  const recommendations = useMemo(() => recommendItems(constraints, recommendationQuery, 4), [constraints, recommendationQuery]);
+  const availableMatchCount = useMemo(() => recommendItems(constraints, recommendationQuery, menuItems.length).length, [constraints, recommendationQuery]);
+  const recommendationSignature = recommendations.map((item) => item.id).join("-");
   const filteredItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    return menuItems.filter((item) => {
-      const categoryMatch = category === "All" || item.category === category;
-      const searchMatch =
-        !normalizedSearch ||
-        [item.name, item.description, item.category, item.ingredients.join(" ")].join(" ").toLowerCase().includes(normalizedSearch);
-      return categoryMatch && searchMatch;
-    });
-  }, [category, search]);
+    return menuItems
+      .filter((item) => {
+        const categoryMatch = category === "All" || item.category === category;
+        const searchMatch =
+          !normalizedSearch ||
+          [item.name, item.description, item.category, item.ingredients.join(" ")].join(" ").toLowerCase().includes(normalizedSearch);
+        return categoryMatch && searchMatch;
+      })
+      .sort((a, b) => Number(isAllowedForConstraints(b, constraints)) - Number(isAllowedForConstraints(a, constraints)));
+  }, [category, constraints, search]);
   const suggestedItems = suggestedIds.map(getMenuItemById).filter((item): item is MenuItem => Boolean(item));
   const totals = getCartTotals(cart);
 
@@ -248,15 +286,11 @@ export function AssistantApp() {
 
   function toggleDietaryPref(pref: DietaryFlag) {
     const active = !constraints.dietaryPrefs.includes(pref);
+    const dietaryPrefs = active ? [...constraints.dietaryPrefs, pref] : constraints.dietaryPrefs.filter((item) => item !== pref);
     const nextConstraints = {
       ...constraints,
-      dietaryPrefs: active ? [...constraints.dietaryPrefs, pref] : constraints.dietaryPrefs.filter((item) => item !== pref),
-      nutritionGoal:
-        pref === "highProtein" && active
-          ? "highProtein"
-          : pref === "lowerCalorie" && active
-            ? "lowerCalorie"
-            : constraints.nutritionGoal,
+      dietaryPrefs,
+      nutritionGoal: getNutritionGoalForPrefs(dietaryPrefs),
     };
     setConstraints(nextConstraints);
     logFilterChange("dietary", nextConstraints, { preference: pref, active });
@@ -517,6 +551,48 @@ export function AssistantApp() {
         </div>
 
         <aside className="side-column">
+          <section
+            className={activeFilterLabels.length || search.trim() ? "recommendation-panel active-recommendations" : "recommendation-panel"}
+            aria-live="polite"
+          >
+            <div className="recommendation-title-row">
+              <div className="section-title">
+                <Utensils size={20} />
+                <h2>Best matches</h2>
+              </div>
+              <span className="recommendation-count">{availableMatchCount} available</span>
+            </div>
+            <p className="recommendation-summary">
+              {activeFilterLabels.length
+                ? `Updated for ${activeFilterLabels.join(", ")}.`
+                : search.trim()
+                  ? `Updated for "${search.trim()}".`
+                  : "Balanced meal picks from the Berkeley menu."}
+            </p>
+            {activeFilterLabels.length ? (
+              <div className="filter-summary-row" aria-label="Active recommendation filters">
+                {activeFilterLabels.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
+            ) : null}
+            <motion.div
+              key={recommendationSignature}
+              className="mini-menu-list"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {recommendations.length ? (
+                recommendations.map((item, index) => (
+                  <MenuMini key={item.id} item={item} rank={index + 1} onAdd={() => addItemToCart(item)} />
+                ))
+              ) : (
+                <p className="muted-text">No exact matches for those filters yet.</p>
+              )}
+            </motion.div>
+          </section>
+
           <section className="cart-panel">
             <div className="section-title">
               <ShoppingBag size={20} />
@@ -635,18 +711,6 @@ export function AssistantApp() {
               </motion.div>
             ) : null}
           </section>
-
-          <section className="recommendation-panel">
-            <div className="section-title">
-              <Utensils size={20} />
-              <h2>Best matches</h2>
-            </div>
-            <div className="mini-menu-list">
-              {recommendations.map((item) => (
-                <MenuMini key={item.id} item={item} onAdd={() => addItemToCart(item)} />
-              ))}
-            </div>
-          </section>
         </aside>
       </section>
 
@@ -740,11 +804,19 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function MenuMini({ item, onAdd }: { item: MenuItem; onAdd: () => void }) {
+function MenuMini({ item, rank, onAdd }: { item: MenuItem; rank: number; onAdd: () => void }) {
   return (
     <motion.button className="mini-menu-item" onClick={onAdd} whileHover={{ x: 4 }} whileTap={{ scale: 0.98 }}>
-      <span>{item.name}</span>
-      <strong>{item.nutrition.protein}g protein</strong>
+      <span className="mini-menu-rank">{rank}</span>
+      <span className="mini-menu-main">
+        <span className="mini-menu-name">{item.name}</span>
+        <span className="mini-menu-detail">{item.category}</span>
+      </span>
+      <span className="mini-menu-meta">
+        {rank === 1 ? <span className="mini-menu-badge">Top match</span> : null}
+        <strong>{item.nutrition.protein}g protein</strong>
+        <span>{item.nutrition.calories} cal</span>
+      </span>
     </motion.button>
   );
 }

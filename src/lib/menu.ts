@@ -135,6 +135,14 @@ export function extractConstraintsFromText(text: string, current: CustomerConstr
 export function itemContainsAvoidedIngredient(item: MenuItem, avoidedIngredient: string) {
   const target = normalizeText(avoidedIngredient);
   const haystack = normalizeText([item.name, item.description, ...item.ingredients].join(" "));
+  const matchingAllergen = ALLERGENS.find((allergen) =>
+    allergenSynonyms[allergen].some((synonym) => target === normalizeText(synonym)),
+  );
+
+  if (matchingAllergen && item.allergens.includes(matchingAllergen)) {
+    return true;
+  }
+
   if (target === "spicy") {
     return item.dietaryFlags.includes("spicy") || haystack.includes("hot sauce") || haystack.includes("jalapeno");
   }
@@ -179,7 +187,10 @@ function shouldFocusOnMeals(constraints: CustomerConstraints, normalizedText: st
   return (
     /\b(meal|eat|order|pickup|bowl|salad|wrap|plate|avoid)\b/.test(normalizedText) ||
     constraints.allergens.length > 0 ||
-    constraints.avoidIngredients.length > 0
+    constraints.avoidIngredients.length > 0 ||
+    constraints.dietaryPrefs.length > 0 ||
+    constraints.nutritionGoal === "highProtein" ||
+    constraints.nutritionGoal === "lowerCalorie"
   );
 }
 
@@ -195,8 +206,14 @@ function scoreItem(item: MenuItem, constraints: CustomerConstraints, query = "")
   if (normalized.includes("wrap") && item.category === "Wraps") score += 3;
   if (normalized.includes("drink") && item.category === "Drinks") score += 3;
 
-  if (constraints.nutritionGoal === "highProtein") score += item.nutrition.protein / 8;
-  if (constraints.nutritionGoal === "lowerCalorie") score += Math.max(0, 850 - item.nutrition.calories) / 100;
+  if (constraints.dietaryPrefs.includes("spicy") && item.dietaryFlags.includes("spicy")) score += 7;
+  if (constraints.dietaryPrefs.includes("vegetarian") && (item.dietaryFlags.includes("vegetarian") || item.dietaryFlags.includes("vegan"))) score += 3;
+  if (constraints.dietaryPrefs.includes("vegan") && item.dietaryFlags.includes("vegan")) score += 4;
+  if (constraints.dietaryPrefs.includes("highProtein")) score += item.dietaryFlags.includes("highProtein") ? 7 : item.nutrition.protein / 8;
+  if (constraints.dietaryPrefs.includes("lowerCalorie")) score += item.dietaryFlags.includes("lowerCalorie") ? 7 : Math.max(0, 750 - item.nutrition.calories) / 120;
+
+  if (constraints.nutritionGoal === "highProtein") score += item.nutrition.protein / 5;
+  if (constraints.nutritionGoal === "lowerCalorie") score += Math.max(0, 850 - item.nutrition.calories) / 85;
   if (constraints.nutritionGoal === "balanced") score += item.nutrition.protein / 12 + Math.max(0, 800 - item.nutrition.calories) / 180;
 
   if (item.dietaryFlags.includes("highProtein")) score += 1;
@@ -204,6 +221,20 @@ function scoreItem(item: MenuItem, constraints: CustomerConstraints, query = "")
   if (item.category === "Bowls" || item.category === "Salads" || item.category === "Protein Plates") score += 1;
 
   return score;
+}
+
+function preferenceMatches(item: MenuItem, pref: DietaryFlag) {
+  if (pref === "spicy") return item.dietaryFlags.includes("spicy");
+  if (pref === "highProtein") return item.dietaryFlags.includes("highProtein") || item.nutrition.protein >= 30;
+  if (pref === "lowerCalorie") return item.dietaryFlags.includes("lowerCalorie") || item.nutrition.calories <= 650;
+  return true;
+}
+
+function focusCandidatesByActivePreferences(items: MenuItem[], constraints: CustomerConstraints) {
+  return (["spicy", "highProtein", "lowerCalorie"] as DietaryFlag[]).reduce((candidates, pref) => {
+    if (!constraints.dietaryPrefs.includes(pref)) return candidates;
+    return candidates.filter((item) => preferenceMatches(item, pref));
+  }, items);
 }
 
 export function recommendItems(constraints: CustomerConstraints, query = "", limit = 5) {
@@ -217,6 +248,8 @@ export function recommendItems(constraints: CustomerConstraints, query = "", lim
     const mealCandidates = candidates.filter(isMealItem);
     if (mealCandidates.length) candidates = mealCandidates;
   }
+
+  candidates = focusCandidatesByActivePreferences(candidates, constraints);
 
   return candidates
     .map((item) => ({ item, score: scoreItem(item, constraints, query) }))
@@ -355,6 +388,14 @@ export function buildDeterministicAnswer(
     const intro = cartActionSuggestions.length
       ? `I found ${cartActionSuggestions.length} item suggestion for your pickup request.`
       : `I can help build a mock pickup order. Your cart currently has ${count} item${count === 1 ? "" : "s"}.`;
+    if (!recommendations.length) {
+      return {
+        message: `${intro} I do not see an exact Berkeley menu match for ${constraintSummary(constraints)}. Try removing one filter or ask the restaurant team about modifications.${severeAllergyNote}`,
+        suggestedItemIds: [],
+        allergyWarnings: [],
+        cartActionSuggestions,
+      };
+    }
     return {
       message: `${intro} Good options right now: ${recommendations.map((item) => `${item.name} (${formatNutrition(item)})`).join("; ")}.${severeAllergyNote}`,
       suggestedItemIds: recommendations.map((item) => item.id),
@@ -371,6 +412,15 @@ export function buildDeterministicAnswer(
         : constraints.allergens.length > 0 || constraints.avoidIngredients.length > 0
           ? "Filtering against your allergy or ingredient constraints, I would suggest:"
           : "I would suggest:";
+
+  if (!recommendations.length) {
+    return {
+      message: `I do not see an exact Berkeley menu match for ${constraintSummary(constraints)}. Try removing one filter, or ask the restaurant team about modifications before ordering.${severeAllergyNote}`,
+      suggestedItemIds: [],
+      allergyWarnings: [],
+      cartActionSuggestions,
+    };
+  }
 
   return {
     message: `${leading} ${recommendations.map((item) => `${item.name} (${formatNutrition(item)})`).join("; ")}.${severeAllergyNote}`,
