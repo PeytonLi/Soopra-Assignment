@@ -7,6 +7,8 @@ import { motion } from "motion/react";
 
 type Summary = {
   configured: boolean;
+  setupRequired?: boolean;
+  missingTables?: string[];
   totalEvents: number;
   chatEvents: number;
   orderSummaries: number;
@@ -78,9 +80,19 @@ export function AnalyticsDashboard() {
         </div>
         <span className={summary.configured ? "status-chip online" : "status-chip"}>
           <Database size={15} />
-          {summary.configured ? "Supabase connected" : "Local fallback"}
+          {summary.configured ? (summary.setupRequired ? "Schema setup needed" : "Supabase connected") : "Local fallback"}
         </span>
       </motion.section>
+
+      {summary.setupRequired ? (
+        <section className="setup-alert" role="status">
+          <strong>Supabase is connected, but the database schema is missing.</strong>
+          <span>
+            Run <code>supabase/schema.sql</code> in the Supabase SQL editor. Missing tables:{" "}
+            {(summary.missingTables ?? []).join(", ") || "assistant_events, pickup_orders"}.
+          </span>
+        </section>
+      ) : null}
 
       <section className="metric-grid" aria-live="polite">
         <Metric icon={<BarChart3 size={20} />} label="Events" value={loading ? "-" : summary.totalEvents} />

@@ -43,6 +43,7 @@ type OrderSubmitResponse = {
   configured: boolean;
   orderId: string | null;
   message: string;
+  setupRequired?: boolean;
 };
 
 const quickPrompts = [
@@ -113,6 +114,26 @@ export function AssistantApp() {
     }).catch(() => undefined);
   }
 
+  function hasAllergyFilter(nextConstraints: CustomerConstraints) {
+    return nextConstraints.allergens.length > 0 || nextConstraints.avoidIngredients.length > 0;
+  }
+
+  function logFilterChange(
+    filterType: "allergen" | "dietary" | "avoidIngredient",
+    nextConstraints: CustomerConstraints,
+    payload: Record<string, unknown>,
+  ) {
+    void logEvent("filter_change", {
+      filterType,
+      hasAllergyFilter: hasAllergyFilter(nextConstraints),
+      allergenCount: nextConstraints.allergens.length,
+      avoidIngredientCount: nextConstraints.avoidIngredients.length,
+      dietaryPrefs: nextConstraints.dietaryPrefs,
+      nutritionGoal: nextConstraints.nutritionGoal,
+      ...payload,
+    });
+  }
+
   async function handleSubmit(event?: FormEvent, promptOverride?: string) {
     event?.preventDefault();
     const text = (promptOverride ?? input).trim();
@@ -168,6 +189,12 @@ export function AssistantApp() {
   function addItemToCart(item: MenuItem, quantity = 1, announce = true) {
     const warnings = getItemWarnings(item, constraints);
     if (warnings.length) {
+      void logEvent("cart_blocked", {
+        itemId: item.id,
+        category: item.category,
+        warningCount: warnings.length,
+        hasAllergyFilter: hasAllergyFilter(constraints),
+      });
       if (announce) {
         setMessages((current) => [
           ...current,
@@ -189,6 +216,12 @@ export function AssistantApp() {
       }
       return [...current, { menuItemId: item.id, quantity, allergyWarnings: warnings }];
     });
+    void logEvent("cart_add", {
+      itemId: item.id,
+      category: item.category,
+      quantity,
+      hasAllergyFilter: hasAllergyFilter(constraints),
+    });
     setPickupSummary(null);
     setOrderSaveState({ status: "idle" });
   }
@@ -204,36 +237,40 @@ export function AssistantApp() {
   }
 
   function toggleAllergen(allergen: Allergen) {
-    setConstraints((current) => ({
-      ...current,
-      allergens: current.allergens.includes(allergen)
-        ? current.allergens.filter((item) => item !== allergen)
-        : [...current.allergens, allergen],
-    }));
+    const active = !constraints.allergens.includes(allergen);
+    const nextConstraints = {
+      ...constraints,
+      allergens: active ? [...constraints.allergens, allergen] : constraints.allergens.filter((item) => item !== allergen),
+    };
+    setConstraints(nextConstraints);
+    logFilterChange("allergen", nextConstraints, { allergen, active });
   }
 
   function toggleDietaryPref(pref: DietaryFlag) {
-    setConstraints((current) => ({
-      ...current,
-      dietaryPrefs: current.dietaryPrefs.includes(pref)
-        ? current.dietaryPrefs.filter((item) => item !== pref)
-        : [...current.dietaryPrefs, pref],
+    const active = !constraints.dietaryPrefs.includes(pref);
+    const nextConstraints = {
+      ...constraints,
+      dietaryPrefs: active ? [...constraints.dietaryPrefs, pref] : constraints.dietaryPrefs.filter((item) => item !== pref),
       nutritionGoal:
-        pref === "highProtein" && !current.dietaryPrefs.includes(pref)
+        pref === "highProtein" && active
           ? "highProtein"
-          : pref === "lowerCalorie" && !current.dietaryPrefs.includes(pref)
+          : pref === "lowerCalorie" && active
             ? "lowerCalorie"
-            : current.nutritionGoal,
-    }));
+            : constraints.nutritionGoal,
+    };
+    setConstraints(nextConstraints);
+    logFilterChange("dietary", nextConstraints, { preference: pref, active });
   }
 
   function addAvoidIngredient() {
     const value = avoidDraft.trim().toLowerCase();
     if (!value) return;
-    setConstraints((current) => ({
-      ...current,
-      avoidIngredients: Array.from(new Set([...current.avoidIngredients, value])),
-    }));
+    const nextConstraints = {
+      ...constraints,
+      avoidIngredients: Array.from(new Set([...constraints.avoidIngredients, value])),
+    };
+    setConstraints(nextConstraints);
+    logFilterChange("avoidIngredient", nextConstraints, { active: true });
     setAvoidDraft("");
   }
 
@@ -461,12 +498,14 @@ export function AssistantApp() {
                 {constraints.avoidIngredients.map((ingredient) => (
                   <button
                     key={ingredient}
-                    onClick={() =>
-                      setConstraints((current) => ({
-                        ...current,
-                        avoidIngredients: current.avoidIngredients.filter((item) => item !== ingredient),
-                      }))
-                    }
+                    onClick={() => {
+                      const nextConstraints = {
+                        ...constraints,
+                        avoidIngredients: constraints.avoidIngredients.filter((item) => item !== ingredient),
+                      };
+                      setConstraints(nextConstraints);
+                      logFilterChange("avoidIngredient", nextConstraints, { active: false });
+                    }}
                   >
                     {ingredient}
                     <Minus size={12} />

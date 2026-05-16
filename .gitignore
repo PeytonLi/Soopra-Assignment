@@ -1,9 +1,11 @@
 .next/
+.vercel/
 node_modules/
 out/
 coverage/
 playwright-report/
 test-results/
 .env
-.env*.local
+.env.*
+!.env.example
 *.tsbuildinfo

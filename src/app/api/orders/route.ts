@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { buildTrustedOrderPayload } from "@/lib/orders";
-import { savePickupOrder } from "@/lib/supabase";
+import { describeSupabaseError, isMissingSupabaseTableError, savePickupOrder } from "@/lib/supabase";
 import type { CartItem, CustomerConstraints } from "@/types";
 
 export const runtime = "nodejs";
@@ -46,12 +46,14 @@ export async function POST(request: NextRequest) {
 
     if (result.error || !result.orderId) {
       console.error("Pickup order insert failed", result.error);
+      const setupRequired = isMissingSupabaseTableError(result.error);
       return NextResponse.json(
         {
           ok: false,
           configured: true,
           orderId: null,
-          message: "Summary created locally, not saved. Supabase could not save the pickup request.",
+          setupRequired,
+          message: `Summary created locally, not saved. ${describeSupabaseError(result.error, "pickup_orders")}`,
         },
         { status: 500 },
       );

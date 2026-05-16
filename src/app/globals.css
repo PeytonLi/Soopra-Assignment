@@ -818,6 +818,27 @@ h3 {
   color: var(--green-dark);
 }
 
+.setup-alert {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  margin-top: 14px;
+  border: 1px solid rgba(197, 87, 63, 0.34);
+  border-radius: 8px;
+  background: #fff3e6;
+  color: var(--ink);
+}
+
+.setup-alert strong {
+  color: var(--danger);
+}
+
+.setup-alert code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
 .metric-grid,
 .dashboard-grid {
   display: grid;

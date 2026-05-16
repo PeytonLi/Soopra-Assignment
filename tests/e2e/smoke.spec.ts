@@ -21,6 +21,9 @@ test("assistant home supports chat, filters, and cart", async ({ page }) => {
 });
 
 test("qr and dashboard pages render", async ({ page }) => {
+  const health = await page.request.get("/api/health");
+  expect(health.ok()).toBe(true);
+
   await page.goto("/qr");
   await expect(page.getByRole("heading", { name: "QR Access" })).toBeVisible();
 

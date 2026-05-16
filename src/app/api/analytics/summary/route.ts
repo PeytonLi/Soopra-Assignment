@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  checkSupabaseSchema,
+  describeSupabaseError,
+  getSupabaseAdmin,
+  isMissingSupabaseTableError,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -31,6 +37,8 @@ export async function GET() {
       topCategories: [],
       recentEvents: [],
       recentOrders: [],
+      setupRequired: true,
+      missingTables: ["assistant_events", "pickup_orders"],
     });
   }
 
@@ -47,8 +55,27 @@ export async function GET() {
 
   if (error) {
     console.error("Analytics summary failed", error);
+    if (isMissingSupabaseTableError(error)) {
+      const schemaStatus = await checkSupabaseSchema();
+      return NextResponse.json({
+        configured: true,
+        setupRequired: true,
+        missingTables: schemaStatus.missingTables,
+        totalEvents: 0,
+        chatEvents: 0,
+        orderSummaries: 0,
+        savedOrders: 0,
+        allergyFilterUses: 0,
+        topCategories: [],
+        recentEvents: [],
+        recentOrders: [],
+        error: describeSupabaseError(error, "assistant_events"),
+      });
+    }
     return NextResponse.json({ configured: true, error: "Unable to read analytics" }, { status: 500 });
   }
+
+  const events = (data ?? []) as StoredEvent[];
 
   const { data: orderData, error: orderError } = await supabase
     .from("pickup_orders")
@@ -58,10 +85,28 @@ export async function GET() {
 
   if (orderError) {
     console.error("Pickup order summary failed", orderError);
+    if (isMissingSupabaseTableError(orderError)) {
+      return NextResponse.json({
+        configured: true,
+        setupRequired: true,
+        missingTables: ["pickup_orders"],
+        totalEvents: events.length,
+        chatEvents: events.filter((event) => event.event_type === "chat_message").length,
+        orderSummaries: events.filter((event) => event.event_type === "order_summary").length,
+        savedOrders: 0,
+        allergyFilterUses: events.filter((event) => Boolean(event.payload?.hasAllergyFilter)).length,
+        topCategories: [],
+        recentEvents: events.slice(0, 8).map((event) => ({
+          type: event.event_type,
+          createdAt: event.created_at,
+        })),
+        recentOrders: [],
+        error: describeSupabaseError(orderError, "pickup_orders"),
+      });
+    }
     return NextResponse.json({ configured: true, error: "Unable to read pickup orders" }, { status: 500 });
   }
 
-  const events = (data ?? []) as StoredEvent[];
   const orders = (orderData ?? []) as StoredOrder[];
   const categoryCounts = new Map<string, number>();
 

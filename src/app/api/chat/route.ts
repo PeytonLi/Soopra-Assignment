@@ -13,6 +13,7 @@ import {
 import type { ChatPresentation, ChatRequest, CustomerConstraints } from "@/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 function sanitizeConstraints(input: Partial<CustomerConstraints> | undefined): CustomerConstraints {
   return {

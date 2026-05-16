@@ -31,7 +31,26 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Required deployment variables:
+## Vercel Deployment
+
+This repo is ready for Vercel as a Next.js project.
+
+- Framework preset: Next.js
+- Install command: `npm ci`
+- Build command: `npm run build`
+- Output directory: leave empty
+- Node.js version: `24.x` from `package.json`
+- Health check: `/api/health`
+
+Deploy from the Vercel dashboard by importing the repository, or from the CLI:
+
+```bash
+npx vercel link
+npx vercel deploy
+npx vercel deploy --prod
+```
+
+Set these environment variables in Vercel Project Settings. Apply them to Production and Preview unless you intentionally want different behavior:
 
 ```bash
 OPENAI_API_KEY=
@@ -41,11 +60,19 @@ SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_APP_URL=
 ```
 
-The app still works without OpenAI or Supabase keys: chat falls back to deterministic menu logic, pickup summaries are created locally, and analytics returns local fallback values.
+`NEXT_PUBLIC_APP_URL` is optional. If it is blank, the QR page derives the deployed URL from the request host. The app still works without OpenAI or Supabase keys: chat falls back to deterministic menu logic, pickup summaries are created locally, and analytics returns local fallback values.
 
 ## Supabase Schema
 
 Run `supabase/schema.sql` in the Supabase SQL editor. It creates `assistant_events` for lightweight analytics and `pickup_orders` for saved demo pickup requests.
+
+After running the schema, verify inserts with:
+
+```bash
+npm run check:supabase
+```
+
+The check creates and deletes one temporary analytics event and one temporary pickup order. If it reports `PGRST205`, the connected Supabase project is missing the table named in the error.
 
 The app uses the service role key only from server-side routes. Do not expose it in client code.
 

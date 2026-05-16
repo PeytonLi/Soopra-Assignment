@@ -94,6 +94,49 @@ describe("api routes", () => {
     );
   });
 
+  it("exposes a deployment health check", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+
+    const { GET } = await import("@/app/api/health/route");
+    const response = GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(json).toEqual({
+      ok: true,
+      service: "sweetgreen-berkeley-ai-assistant",
+      environment: "preview",
+    });
+  });
+
+  it("exposes Supabase schema health diagnostics", async () => {
+    vi.doMock("@/lib/supabase", () => ({
+      checkSupabaseSchema: vi.fn(async () => ({
+        configured: true,
+        connected: true,
+        schemaReady: false,
+        missingTables: ["assistant_events", "pickup_orders"],
+        errors: [],
+      })),
+    }));
+
+    const { GET } = await import("@/app/api/health/supabase/route");
+    const response = await GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(json).toEqual({
+      ok: false,
+      configured: true,
+      connected: true,
+      schemaReady: false,
+      missingTables: ["assistant_events", "pickup_orders"],
+      errors: [],
+    });
+  });
+
   it("saves pickup orders through the backend route", async () => {
     const savePickupOrder = vi.fn(async () => ({ configured: true, error: null, orderId: "order-12345678" }));
     vi.doMock("@/lib/supabase", () => ({
@@ -154,6 +197,37 @@ describe("api routes", () => {
     expect(json.ok).toBe(false);
     expect(json.configured).toBe(false);
     expect(json.message).toContain("not saved");
+  });
+
+  it("returns a schema setup message when Supabase tables are missing", async () => {
+    vi.doMock("@/lib/supabase", async (importOriginal) => ({
+      ...((await importOriginal()) as object),
+      savePickupOrder: vi.fn(async () => ({
+        configured: true,
+        error: { code: "PGRST205", message: "Could not find the table 'public.pickup_orders' in the schema cache" },
+        orderId: null,
+      })),
+    }));
+
+    const { POST } = await import("@/app/api/orders/route");
+    const response = await POST(
+      new Request("http://localhost/api/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "session-1",
+          customerName: "Ada",
+          pickupTime: "12:30",
+          cart: [{ menuItemId: "harvest-bowl", quantity: 1, allergyWarnings: [] }],
+          constraints: { allergens: [], avoidIngredients: [], dietaryPrefs: [], nutritionGoal: "balanced" },
+        }),
+      }) as never,
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(json.setupRequired).toBe(true);
+    expect(json.message).toContain("supabase/schema.sql");
+    expect(json.message).toContain("pickup_orders");
   });
 
   it("rejects empty pickup orders", async () => {
