@@ -50,6 +50,8 @@ const avoidIngredientCandidates = [
   "hot sauce",
 ];
 
+const mealCategories = new Set<MenuItem["category"]>(["Protein Plates", "Bowls", "Salads", "Wraps", "Kids Meals"]);
+
 export function normalizeText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\s+]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -164,6 +166,23 @@ export function isAllowedForConstraints(item: MenuItem, constraints: CustomerCon
   return true;
 }
 
+function isMealItem(item: MenuItem) {
+  return mealCategories.has(item.category);
+}
+
+function isDrinkRequest(normalizedText: string) {
+  return /\b(drink|drinks|beverage|water|tea|kombucha|soda)\b/.test(normalizedText);
+}
+
+function shouldFocusOnMeals(constraints: CustomerConstraints, normalizedText: string) {
+  if (isDrinkRequest(normalizedText)) return false;
+  return (
+    /\b(meal|eat|order|pickup|bowl|salad|wrap|plate|avoid)\b/.test(normalizedText) ||
+    constraints.allergens.length > 0 ||
+    constraints.avoidIngredients.length > 0
+  );
+}
+
 function scoreItem(item: MenuItem, constraints: CustomerConstraints, query = "") {
   const normalized = normalizeText(query);
   let score = 0;
@@ -188,16 +207,53 @@ function scoreItem(item: MenuItem, constraints: CustomerConstraints, query = "")
 }
 
 export function recommendItems(constraints: CustomerConstraints, query = "", limit = 5) {
+  const normalized = normalizeText(query);
   const calorieLimit = extractCalorieLimit(query);
   const allowedItems = menuItems.filter((item) => isAllowedForConstraints(item, constraints));
   const calorieFilteredItems = calorieLimit ? allowedItems.filter((item) => item.nutrition.calories <= calorieLimit) : allowedItems;
-  const candidates = calorieFilteredItems.length ? calorieFilteredItems : allowedItems;
+  let candidates = calorieFilteredItems.length ? calorieFilteredItems : allowedItems;
+
+  if (shouldFocusOnMeals(constraints, normalized)) {
+    const mealCandidates = candidates.filter(isMealItem);
+    if (mealCandidates.length) candidates = mealCandidates;
+  }
 
   return candidates
     .map((item) => ({ item, score: scoreItem(item, constraints, query) }))
     .sort((a, b) => b.score - a.score || b.item.nutrition.protein - a.item.nutrition.protein || a.item.nutrition.calories - b.item.nutrition.calories)
     .slice(0, limit)
     .map(({ item }) => item);
+}
+
+export function isAllergyAvoidanceQuestion(text: string, constraints: CustomerConstraints) {
+  if (constraints.allergens.length === 0 && constraints.avoidIngredients.length === 0) return false;
+  const normalized = normalizeText(text);
+  return /\b(avoid|stay away|not eat|not have|cannot have|can't have|unsafe)\b/.test(normalized);
+}
+
+function getAvoidanceItems(constraints: CustomerConstraints, limit = 6) {
+  const flaggedItems = menuItems.filter((item) => item.availableAtBerkeley && getItemWarnings(item, constraints).length > 0);
+  const mealFlaggedItems = flaggedItems.filter(isMealItem);
+  const candidates = mealFlaggedItems.length ? mealFlaggedItems : flaggedItems;
+
+  return candidates
+    .map((item) => ({ item, score: scoreItem(item, constraints, "meal") }))
+    .sort((a, b) => b.score - a.score || b.item.nutrition.protein - a.item.nutrition.protein || a.item.nutrition.calories - b.item.nutrition.calories)
+    .slice(0, limit)
+    .map(({ item }) => item);
+}
+
+function formatItemNames(items: MenuItem[]) {
+  return items.map((item) => item.name).join(", ");
+}
+
+function allergyAvoidanceSummary(constraints: CustomerConstraints) {
+  const allergenText = constraints.allergens.map(formatAllergen).join(", ");
+  const parts = [
+    constraints.allergens.length ? `${allergenText} ${constraints.allergens.length === 1 ? "allergy" : "allergies"}` : null,
+    constraints.avoidIngredients.length ? `avoid ${constraints.avoidIngredients.join(", ")}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join("; ") : constraintSummary(constraints);
 }
 
 export function findMentionedItems(text: string) {
@@ -274,6 +330,25 @@ export function buildDeterministicAnswer(
     constraints.allergens.length > 0
       ? " Because allergies can involve shared prep areas and cross-contact risk, please tell the Sweetgreen team before ordering; I can filter the official allergen data, but I cannot guarantee a meal is allergen-free."
       : "";
+
+  if (isAllergyAvoidanceQuestion(userText, constraints)) {
+    const avoidItems = getAvoidanceItems(constraints);
+    const safeMealOptions = recommendItems(constraints, `${userText} meal`, 4);
+    const constraintText = allergyAvoidanceSummary(constraints);
+    const avoidText = avoidItems.length
+      ? `In the Berkeley menu data, avoid meal items flagged against ${constraintText}: ${formatItemNames(avoidItems)}.`
+      : `I do not see specific meal items flagged against ${constraintText} in the current menu data.`;
+    const safeText = safeMealOptions.length
+      ? `Better allergy-aware meal starts: ${safeMealOptions.map((item) => `${item.name} (${formatNutrition(item)})`).join("; ")}.`
+      : "I do not see a safe meal match in the current menu data.";
+
+    return {
+      message: `${avoidText} ${safeText} For a pickup order, add a note that the guest has ${constraintText} and ask the team to avoid those ingredients and confirm cross-contact risk.`,
+      suggestedItemIds: safeMealOptions.map((item) => item.id),
+      allergyWarnings: avoidItems.flatMap((item) => getItemWarnings(item, constraints)),
+      cartActionSuggestions,
+    };
+  }
 
   if (normalized.includes("order") || normalized.includes("pickup") || normalized.includes("pick up")) {
     const count = cart.reduce((sum, item) => sum + item.quantity, 0);

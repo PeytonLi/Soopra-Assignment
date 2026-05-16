@@ -283,7 +283,7 @@ export function AssistantApp() {
 
   async function createPickupSummary() {
     if (!customerName.trim() || !pickupTime || cart.length === 0) return;
-    const summary = buildPickupSummary(customerName, pickupTime, cart);
+    const summary = buildPickupSummary(customerName, pickupTime, cart, constraints);
     setPickupSummary(summary);
     setOrderSaveState({ status: "saving", message: "Saving pickup request..." });
 
@@ -620,6 +620,12 @@ export function AssistantApp() {
                   {pickupSummary.totalNutrition.calories} cal · {pickupSummary.totalNutrition.protein}g protein ·{" "}
                   {pickupSummary.totalNutrition.carbs}g carbs · {pickupSummary.totalNutrition.fat}g fat
                 </strong>
+                {pickupSummary.warnings.map((warning) => (
+                  <p className="warning-line" key={warning}>
+                    <AlertTriangle size={14} />
+                    {warning}
+                  </p>
+                ))}
                 <p className="warning-line">
                   <AlertTriangle size={14} />
                   {orderSaveState.status === "saved"

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildDeterministicAnswer, extractConstraintsFromText, findRequestedCartItems, getItemWarnings, getMenuItemById, recommendItems } from "@/lib/menu";
-import type { CustomerConstraints } from "@/types";
+import { buildPickupSummary, buildTrustedOrderPayload } from "@/lib/orders";
+import type { ChatResponse, CustomerConstraints } from "@/types";
 
 const baseConstraints: CustomerConstraints = {
   allergens: [],
@@ -9,6 +10,12 @@ const baseConstraints: CustomerConstraints = {
   dietaryPrefs: [],
   nutritionGoal: "balanced",
 };
+
+afterEach(() => {
+  vi.resetModules();
+  vi.unstubAllEnvs();
+  vi.doUnmock("openai");
+});
 
 describe("menu filtering and recommendations", () => {
   it("filters items that contain a selected allergen", () => {
@@ -60,5 +67,70 @@ describe("menu filtering and recommendations", () => {
 
     expect(answer.message).toContain("cross-contact");
     expect(answer.suggestedItemIds.length).toBeGreaterThan(0);
+  });
+
+  it("answers dairy avoidance questions with meal guidance instead of drinks", () => {
+    const constraints = extractConstraintsFromText("I have a dairy allergy. What should I avoid?", baseConstraints);
+    const answer = buildDeterministicAnswer("What should I avoid?", constraints, []);
+    const suggestions = answer.suggestedItemIds.map(getMenuItemById);
+
+    expect(answer.message).toContain("avoid meal items flagged against dairy allergy");
+    expect(answer.message).toContain("Better allergy-aware meal starts");
+    expect(answer.message).toContain("pickup order");
+    expect(answer.message).not.toContain("Open Water");
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.every((item) => item?.category !== "Drinks")).toBe(true);
+  });
+
+  it("keeps allergy avoidance answers deterministic even if OpenAI suggests drinks", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    vi.doMock("openai", () => ({
+      default: class MockOpenAI {
+        responses = {
+          create: vi.fn(async () => ({
+            output_text: "You can have Open Water Still Water, Jasmine Green Tea, Hibiscus Berry Clover Tea, or Open Water Sparkling Water.",
+          })),
+        };
+      },
+    }));
+
+    const { POST } = await import("@/app/api/chat/route");
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [
+            { role: "user", content: "I have a dairy allergy." },
+            { role: "assistant", content: "I will filter for dairy." },
+            { role: "user", content: "What should I avoid?" },
+          ],
+          cart: [],
+          constraints: { allergens: ["dairy"], avoidIngredients: [], dietaryPrefs: [], nutritionGoal: "balanced" },
+        }),
+      }) as never,
+    );
+    const json = (await response.json()) as ChatResponse;
+    const suggestions = json.suggestedItemIds.map(getMenuItemById);
+
+    expect(json.message).toContain("avoid meal items flagged against dairy allergy");
+    expect(json.message).not.toContain("Open Water Still Water");
+    expect(suggestions.every((item) => item?.category !== "Drinks")).toBe(true);
+  });
+
+  it("adds allergy notes to pickup summaries and trusted orders", () => {
+    const constraints: CustomerConstraints = { ...baseConstraints, allergens: ["dairy"] };
+    const cart = [{ menuItemId: "mini-mezze", quantity: 1, allergyWarnings: [] }];
+
+    const summary = buildPickupSummary("Ada", "12:30", cart, constraints);
+    const order = buildTrustedOrderPayload({
+      sessionId: "session-1",
+      customerName: "Ada",
+      pickupTime: "12:30",
+      cart,
+      constraints,
+    });
+
+    expect(summary.warnings).toContain("Order note: dairy allergy. Avoid dairy ingredients and confirm shared-prep cross-contact risk with staff.");
+    expect(order.allergyWarnings).toContain("Order note: dairy allergy. Avoid dairy ingredients and confirm shared-prep cross-contact risk with staff.");
   });
 });

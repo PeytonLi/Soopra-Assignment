@@ -8,6 +8,7 @@ import {
   extractConstraintsFromText,
   formatNutrition,
   getMenuItemById,
+  isAllergyAvoidanceQuestion,
   normalizeText,
 } from "@/lib/menu";
 import type { ChatPresentation, ChatRequest, CustomerConstraints } from "@/types";
@@ -217,10 +218,11 @@ export async function POST(request: NextRequest) {
     const latestUser = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
     const constraints = extractConstraintsFromText(latestUser, sanitizeConstraints(body.constraints));
     const local = buildDeterministicAnswer(latestUser, constraints, cart);
+    const shouldUseLocalAvoidanceAnswer = isAllergyAvoidanceQuestion(latestUser, constraints);
 
     let message = local.message;
     try {
-      const aiMessage = await askOpenAI(latestUser, { messages, cart, constraints }, constraints, local.message);
+      const aiMessage = shouldUseLocalAvoidanceAnswer ? null : await askOpenAI(latestUser, { messages, cart, constraints }, constraints, local.message);
       if (aiMessage) {
         message = aiMessage;
       }
@@ -231,7 +233,7 @@ export async function POST(request: NextRequest) {
     message = stripUnsupportedMarkdown(message);
 
     const presentation = buildChatPresentation(latestUser, constraints, local.suggestedItemIds);
-    if (presentation) {
+    if (presentation && !shouldUseLocalAvoidanceAnswer) {
       message = presentationSummary(presentation, constraints);
     } else if (constraints.allergens.length > 0 && !message.toLowerCase().includes("cross-contact")) {
       message += " For severe allergies, please tell the restaurant team before ordering because shared prep areas can create cross-contact risk.";

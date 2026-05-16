@@ -1,4 +1,4 @@
-import { getMenuItemById } from "@/lib/menu";
+import { formatAllergen, getMenuItemById } from "@/lib/menu";
 import type { CartItem, CustomerConstraints, MenuCategory, Nutrition } from "@/types";
 
 export type PickupSummary = {
@@ -40,6 +40,23 @@ export type TrustedOrderPayload = {
   allergyWarnings: string[];
   constraints: CustomerConstraints;
 };
+
+export function buildOrderAllergyNotes(constraints?: CustomerConstraints) {
+  if (!constraints) return [];
+
+  const notes: string[] = [];
+  if (constraints.allergens.length > 0) {
+    const allergens = constraints.allergens.map(formatAllergen).join(", ");
+    const allergyText = `${allergens} ${constraints.allergens.length === 1 ? "allergy" : "allergies"}`;
+    notes.push(`Order note: ${allergyText}. Avoid ${allergens} ingredients and confirm shared-prep cross-contact risk with staff.`);
+  }
+
+  if (constraints.avoidIngredients.length > 0) {
+    notes.push(`Order note: avoid ${constraints.avoidIngredients.join(", ")}. Confirm the selected items are prepared without those ingredients.`);
+  }
+
+  return notes;
+}
 
 export function getCartTotals(cart: CartItem[]) {
   return cart.reduce(
@@ -135,12 +152,12 @@ export function buildTrustedOrderPayload(input: {
     status: "submitted",
     items,
     totalNutrition,
-    allergyWarnings: Array.from(new Set(input.cart.flatMap((item) => item.allergyWarnings))),
+    allergyWarnings: Array.from(new Set([...input.cart.flatMap((item) => item.allergyWarnings), ...buildOrderAllergyNotes(input.constraints)])),
     constraints: input.constraints,
   };
 }
 
-export function buildPickupSummary(customerName: string, pickupTime: string, cart: CartItem[]): PickupSummary {
+export function buildPickupSummary(customerName: string, pickupTime: string, cart: CartItem[], constraints?: CustomerConstraints): PickupSummary {
   const totals = getCartTotals(cart);
   const lines = cart
     .map((cartItem) => {
@@ -162,6 +179,6 @@ export function buildPickupSummary(customerName: string, pickupTime: string, car
       fat: totals.fat,
     },
     lines,
-    warnings: Array.from(new Set(cart.flatMap((item) => item.allergyWarnings))),
+    warnings: Array.from(new Set([...cart.flatMap((item) => item.allergyWarnings), ...buildOrderAllergyNotes(constraints)])),
   };
 }
