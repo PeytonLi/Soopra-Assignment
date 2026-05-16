@@ -154,6 +154,16 @@ export function buildChatPresentation(
   };
 }
 
+function presentationSummary(presentation: ChatPresentation, constraints: CustomerConstraints) {
+  const topCard = presentation.cards[0];
+  const allergyNote =
+    constraints.allergens.length > 0
+      ? " Please tell the restaurant team about severe allergies because shared prep can create cross-contact risk."
+      : "";
+
+  return `Best match: ${topCard.name} has ${topCard.calories} calories and ${topCard.protein}g protein.${allergyNote}`;
+}
+
 async function askOpenAI(userText: string, request: ChatRequest, constraints: CustomerConstraints, localMessage: string) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -219,11 +229,12 @@ export async function POST(request: NextRequest) {
 
     message = stripUnsupportedMarkdown(message);
 
-    if (constraints.allergens.length > 0 && !message.toLowerCase().includes("cross-contact")) {
+    const presentation = buildChatPresentation(latestUser, constraints, local.suggestedItemIds);
+    if (presentation) {
+      message = presentationSummary(presentation, constraints);
+    } else if (constraints.allergens.length > 0 && !message.toLowerCase().includes("cross-contact")) {
       message += " For severe allergies, please tell the restaurant team before ordering because shared prep areas can create cross-contact risk.";
     }
-
-    const presentation = buildChatPresentation(latestUser, constraints, local.suggestedItemIds);
 
     return NextResponse.json({
       message,

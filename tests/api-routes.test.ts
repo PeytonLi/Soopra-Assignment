@@ -58,7 +58,6 @@ describe("api routes", () => {
     );
     const json = await response.json();
 
-    expect(json.message).toContain("Try the Shroomami");
     expect(json.message).not.toContain("**");
     expect(json.message).toContain("cross-contact");
     expect(json.presentation?.variant).toBe("recommendationCards");
