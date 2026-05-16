@@ -10,9 +10,19 @@ type Summary = {
   totalEvents: number;
   chatEvents: number;
   orderSummaries: number;
+  savedOrders: number;
   allergyFilterUses: number;
   topCategories: Array<{ category: string; count: number }>;
   recentEvents: Array<{ type: string; createdAt: string }>;
+  recentOrders: Array<{
+    id: string;
+    createdAt: string;
+    customerName: string;
+    pickupTime: string;
+    status: string;
+    itemCount: number;
+    items: string[];
+  }>;
   error?: string;
 };
 
@@ -21,9 +31,11 @@ const emptySummary: Summary = {
   totalEvents: 0,
   chatEvents: 0,
   orderSummaries: 0,
+  savedOrders: 0,
   allergyFilterUses: 0,
   topCategories: [],
   recentEvents: [],
+  recentOrders: [],
 };
 
 export function AnalyticsDashboard() {
@@ -73,16 +85,42 @@ export function AnalyticsDashboard() {
       <section className="metric-grid" aria-live="polite">
         <Metric icon={<BarChart3 size={20} />} label="Events" value={loading ? "-" : summary.totalEvents} />
         <Metric icon={<MessageSquare size={20} />} label="Chats" value={loading ? "-" : summary.chatEvents} />
-        <Metric icon={<ShoppingBag size={20} />} label="Orders" value={loading ? "-" : summary.orderSummaries} />
+        <Metric icon={<ShoppingBag size={20} />} label="Saved orders" value={loading ? "-" : summary.savedOrders} />
         <Metric icon={<ShieldAlert size={20} />} label="Allergy filters" value={loading ? "-" : summary.allergyFilterUses} />
       </section>
 
       <section className="dashboard-grid">
         <motion.div
+          className="dashboard-panel order-queue-panel"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1, duration: 0.34 }}
+        >
+          <h2>Pickup order queue</h2>
+          {summary.recentOrders.length ? (
+            <ul className="order-list">
+              {summary.recentOrders.map((order) => (
+                <li key={order.id}>
+                  <div>
+                    <strong>{order.customerName}</strong>
+                    <span>
+                      {order.pickupTime} · {order.itemCount} item{order.itemCount === 1 ? "" : "s"} · {order.status}
+                    </span>
+                    <small>{order.items.join(", ")}</small>
+                  </div>
+                  <code>{order.id.slice(0, 8)}</code>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted-text">No saved pickup orders yet.</p>
+          )}
+        </motion.div>
+        <motion.div
           className="dashboard-panel"
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.12, duration: 0.34 }}
+          transition={{ delay: 0.16, duration: 0.34 }}
         >
           <h2>Top categories</h2>
           {summary.topCategories.length ? (
@@ -102,7 +140,7 @@ export function AnalyticsDashboard() {
           className="dashboard-panel"
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.18, duration: 0.34 }}
+          transition={{ delay: 0.22, duration: 0.34 }}
         >
           <h2>Recent events</h2>
           {summary.recentEvents.length ? (

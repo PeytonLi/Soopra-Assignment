@@ -32,6 +32,19 @@ import {
 import { buildPickupSummary, getCartTotals, type PickupSummary } from "@/lib/orders";
 import { ALLERGENS, type Allergen, type CartItem, type ChatMessage, type ChatResponse, type CustomerConstraints, type DietaryFlag, type MenuCategory, type MenuItem } from "@/types";
 
+type OrderSaveState = {
+  status: "idle" | "saving" | "saved" | "local" | "error";
+  orderId?: string | null;
+  message?: string;
+};
+
+type OrderSubmitResponse = {
+  ok: boolean;
+  configured: boolean;
+  orderId: string | null;
+  message: string;
+};
+
 const quickPrompts = [
   "What are your spicy vegetarian options?",
   "High-protein meal under 650 calories",
@@ -75,6 +88,7 @@ export function AssistantApp() {
   const [customerName, setCustomerName] = useState("");
   const [pickupTime, setPickupTime] = useState("12:30");
   const [pickupSummary, setPickupSummary] = useState<PickupSummary | null>(null);
+  const [orderSaveState, setOrderSaveState] = useState<OrderSaveState>({ status: "idle" });
 
   const recommendations = useMemo(() => recommendItems(constraints, input || search, 4), [constraints, input, search]);
   const filteredItems = useMemo(() => {
@@ -109,6 +123,7 @@ export function AssistantApp() {
     setInput("");
     setPending(true);
     setPickupSummary(null);
+    setOrderSaveState({ status: "idle" });
 
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(nextMessages);
@@ -120,7 +135,7 @@ export function AssistantApp() {
         body: JSON.stringify({ messages: nextMessages, cart, constraints: nextConstraints }),
       });
       const data = (await response.json()) as ChatResponse;
-      setMessages([...nextMessages, { role: "assistant", content: data.message }]);
+      setMessages([...nextMessages, { role: "assistant", content: data.message, presentation: data.presentation }]);
       setSuggestedIds(data.suggestedItemIds ?? []);
       if (data.cartActionSuggestions?.length) {
         for (const suggestion of data.cartActionSuggestions) {
@@ -175,6 +190,7 @@ export function AssistantApp() {
       return [...current, { menuItemId: item.id, quantity, allergyWarnings: warnings }];
     });
     setPickupSummary(null);
+    setOrderSaveState({ status: "idle" });
   }
 
   function updateQuantity(id: string, delta: number) {
@@ -184,6 +200,7 @@ export function AssistantApp() {
         .filter((item) => item.quantity > 0),
     );
     setPickupSummary(null);
+    setOrderSaveState({ status: "idle" });
   }
 
   function toggleAllergen(allergen: Allergen) {
@@ -227,16 +244,47 @@ export function AssistantApp() {
     }
   }
 
-  function createPickupSummary() {
+  async function createPickupSummary() {
     if (!customerName.trim() || !pickupTime || cart.length === 0) return;
     const summary = buildPickupSummary(customerName, pickupTime, cart);
     setPickupSummary(summary);
-    void logEvent("order_summary", {
-      itemCount: summary.itemCount,
-      totalCalories: summary.totalNutrition.calories,
-      hasAllergyFilter: constraints.allergens.length > 0 || constraints.avoidIngredients.length > 0,
-      categories: cart.map((cartItem) => getMenuItemById(cartItem.menuItemId)?.category).filter(Boolean),
-    });
+    setOrderSaveState({ status: "saving", message: "Saving pickup request..." });
+
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          customerName,
+          pickupTime,
+          cart,
+          constraints,
+        }),
+      });
+      const result = (await response.json()) as OrderSubmitResponse;
+      const nextStatus: OrderSaveState["status"] = result.ok ? "saved" : result.configured ? "error" : "local";
+
+      setOrderSaveState({
+        status: nextStatus,
+        orderId: result.orderId,
+        message: result.message,
+      });
+
+      void logEvent("order_summary", {
+        itemCount: summary.itemCount,
+        totalCalories: summary.totalNutrition.calories,
+        hasAllergyFilter: constraints.allergens.length > 0 || constraints.avoidIngredients.length > 0,
+        categories: cart.map((cartItem) => getMenuItemById(cartItem.menuItemId)?.category).filter(Boolean),
+        orderSaved: result.ok,
+      });
+    } catch {
+      setOrderSaveState({
+        status: "error",
+        orderId: null,
+        message: "Summary created locally, but the order API could not be reached.",
+      });
+    }
   }
 
   return (
@@ -286,7 +334,7 @@ export function AssistantApp() {
                     exit={{ opacity: 0, y: -6, scale: 0.98 }}
                     transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
                   >
-                    <p>{message.content}</p>
+                    <AssistantMessage message={message} />
                   </motion.article>
                 ))}
                 {pending ? (
@@ -498,8 +546,11 @@ export function AssistantApp() {
             <div className="pickup-form">
               <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Pickup name" aria-label="Pickup name" />
               <input value={pickupTime} onChange={(event) => setPickupTime(event.target.value)} type="time" aria-label="Pickup time" />
-              <button onClick={createPickupSummary} disabled={!customerName.trim() || !pickupTime || cart.length === 0}>
-                Create summary
+              <button
+                onClick={() => void createPickupSummary()}
+                disabled={!customerName.trim() || !pickupTime || cart.length === 0 || orderSaveState.status === "saving"}
+              >
+                {orderSaveState.status === "saving" ? "Saving..." : "Create summary"}
               </button>
             </div>
 
@@ -514,6 +565,13 @@ export function AssistantApp() {
                 <p>
                   {pickupSummary.customerName} · {pickupSummary.pickupTime}
                 </p>
+                {orderSaveState.status !== "idle" ? (
+                  <p className={`order-status ${orderSaveState.status}`}>
+                    {orderSaveState.status === "saved" && orderSaveState.orderId
+                      ? `Saved to Supabase · ${orderSaveState.orderId.slice(0, 8)}`
+                      : orderSaveState.message}
+                  </p>
+                ) : null}
                 <ul>
                   {pickupSummary.lines.map((line) => (
                     <li key={line}>{line}</li>
@@ -525,7 +583,9 @@ export function AssistantApp() {
                 </strong>
                 <p className="warning-line">
                   <AlertTriangle size={14} />
-                  Mock pickup only. No payment or real restaurant order was placed.
+                  {orderSaveState.status === "saved"
+                    ? "Demo pickup request saved. This is not sent to Sweetgreen and no payment was collected."
+                    : "Demo pickup request created locally. This is not sent to Sweetgreen and no payment was collected."}
                 </p>
               </motion.div>
             ) : null}
@@ -570,6 +630,68 @@ export function AssistantApp() {
         </div>
       </section>
     </main>
+  );
+}
+
+function stripUnsupportedMarkdown(value: string) {
+  return value
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .trim();
+}
+
+function AssistantMessage({ message }: { message: ChatMessage }) {
+  const content = message.role === "assistant" ? stripUnsupportedMarkdown(message.content) : message.content;
+
+  if (message.role !== "assistant" || message.presentation?.variant !== "recommendationCards") {
+    return <p>{content}</p>;
+  }
+
+  return (
+    <div className="assistant-response">
+      {content ? <p>{content}</p> : null}
+      <div className="assistant-card-group" aria-label={message.presentation.heading}>
+        <h3>{message.presentation.heading}</h3>
+        <div className="assistant-rec-list">
+          {message.presentation.cards.map((card) => (
+            <article className="assistant-rec-card" key={card.menuItemId}>
+              <div>
+                <h4>{card.name}</h4>
+                <p>{card.reason}</p>
+              </div>
+              <div className="assistant-macro-row" aria-label={`Macros for ${card.name}`}>
+                <span>
+                  <strong>{card.calories}</strong>
+                  cal
+                </span>
+                <span>
+                  <strong>{card.protein}g</strong>
+                  protein
+                </span>
+                <span>
+                  <strong>{card.carbs}g</strong>
+                  carbs
+                </span>
+                <span>
+                  <strong>{card.fat}g</strong>
+                  fat
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+        {message.presentation.notes?.length ? (
+          <ul className="assistant-note-list">
+            {message.presentation.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

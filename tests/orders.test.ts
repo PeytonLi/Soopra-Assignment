@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPickupSummary, getCartTotals } from "@/lib/orders";
+import { buildPickupSummary, buildTrustedOrderPayload, getCartTotals } from "@/lib/orders";
 import type { CartItem } from "@/types";
 
 const cart: CartItem[] = [
@@ -23,5 +23,38 @@ describe("pickup orders", () => {
     expect(summary.customerName).toBe("Ada");
     expect(summary.lines).toContain("2x Harvest Bowl");
     expect(summary.totalNutrition.carbs).toBe(120);
+  });
+
+  it("rebuilds trusted order payloads from menu data", () => {
+    const order = buildTrustedOrderPayload({
+      sessionId: "session-1",
+      customerName: " Ada ",
+      pickupTime: "12:30",
+      cart,
+      constraints: { allergens: [], avoidIngredients: [], dietaryPrefs: [], nutritionGoal: "balanced" },
+    });
+
+    expect(order.customerName).toBe("Ada");
+    expect(order.status).toBe("submitted");
+    expect(order.items[0]).toEqual(
+      expect.objectContaining({
+        menuItemId: "harvest-bowl",
+        name: "Harvest Bowl",
+        quantity: 2,
+      }),
+    );
+    expect(order.totalNutrition.calories).toBe(1520);
+  });
+
+  it("rejects unknown order items", () => {
+    expect(() =>
+      buildTrustedOrderPayload({
+        sessionId: "session-1",
+        customerName: "Ada",
+        pickupTime: "12:30",
+        cart: [{ menuItemId: "not-real", quantity: 1, allergyWarnings: [] }],
+        constraints: { allergens: [], avoidIngredients: [], dietaryPrefs: [], nutritionGoal: "balanced" },
+      }),
+    ).toThrow("Unknown menu item");
   });
 });

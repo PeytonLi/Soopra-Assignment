@@ -16,8 +16,9 @@ Option A take-home project: a deployed AI assistant for Sweetgreen Berkeley that
 - `src/data/menu.ts` contains a static May 2026 Sweetgreen menu snapshot with calories, macros, ingredients, allergens, dietary flags, and source metadata.
 - `src/lib/menu.ts` performs deterministic allergy filtering, ingredient exclusions, macro sorting, natural-language constraint extraction, and fallback assistant responses.
 - `src/app/api/chat/route.ts` calls OpenAI when `OPENAI_API_KEY` is configured, but keeps local recommendations and allergy warnings authoritative.
+- `src/app/api/orders/route.ts` rebuilds pickup orders from trusted menu data and saves demo pickup requests to Supabase.
 - `src/app/api/events/route.ts` logs anonymized events only. It strips names, contact fields, messages, and transcripts before Supabase insert.
-- `src/app/api/analytics/summary/route.ts` reads aggregate event metrics for the dashboard.
+- `src/app/api/analytics/summary/route.ts` reads event metrics and recent saved pickup orders for the dashboard.
 - `src/components/AssistantApp.tsx` provides the chat, menu browser, filters, cart, and mock pickup summary.
 
 ## Setup
@@ -40,11 +41,11 @@ SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_APP_URL=
 ```
 
-The app still works without OpenAI or Supabase keys: chat falls back to deterministic menu logic, and analytics returns local fallback values.
+The app still works without OpenAI or Supabase keys: chat falls back to deterministic menu logic, pickup summaries are created locally, and analytics returns local fallback values.
 
 ## Supabase Schema
 
-Run `supabase/schema.sql` in the Supabase SQL editor.
+Run `supabase/schema.sql` in the Supabase SQL editor. It creates `assistant_events` for lightweight analytics and `pickup_orders` for saved demo pickup requests.
 
 The app uses the service role key only from server-side routes. Do not expose it in client code.
 

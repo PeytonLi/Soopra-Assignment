@@ -54,6 +54,12 @@ export function normalizeText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\s+]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function extractCalorieLimit(text: string) {
+  const normalized = normalizeText(text);
+  const match = normalized.match(/\b(?:under|below|less than|max|maximum)\s+(\d{2,4})\b/);
+  return match ? Number(match[1]) : null;
+}
+
 export function getMenuItemById(id: string) {
   return menuItems.find((item) => item.id === id);
 }
@@ -110,7 +116,9 @@ export function extractConstraintsFromText(text: string, current: CustomerConstr
   }
   if (normalized.includes("low calorie") || normalized.includes("lower calorie") || normalized.includes("under 650") || normalized.includes("under 600")) {
     dietaryPrefs.push("lowerCalorie");
-    nutritionGoal = "lowerCalorie";
+    if (!dietaryPrefs.includes("highProtein")) {
+      nutritionGoal = "lowerCalorie";
+    }
   }
 
   const avoidIngredients = avoidIngredientCandidates.filter((ingredient) => {
@@ -180,8 +188,12 @@ function scoreItem(item: MenuItem, constraints: CustomerConstraints, query = "")
 }
 
 export function recommendItems(constraints: CustomerConstraints, query = "", limit = 5) {
-  return menuItems
-    .filter((item) => isAllowedForConstraints(item, constraints))
+  const calorieLimit = extractCalorieLimit(query);
+  const allowedItems = menuItems.filter((item) => isAllowedForConstraints(item, constraints));
+  const calorieFilteredItems = calorieLimit ? allowedItems.filter((item) => item.nutrition.calories <= calorieLimit) : allowedItems;
+  const candidates = calorieFilteredItems.length ? calorieFilteredItems : allowedItems;
+
+  return candidates
     .map((item) => ({ item, score: scoreItem(item, constraints, query) }))
     .sort((a, b) => b.score - a.score || b.item.nutrition.protein - a.item.nutrition.protein || a.item.nutrition.calories - b.item.nutrition.calories)
     .slice(0, limit)

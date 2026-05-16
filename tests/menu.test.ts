@@ -36,6 +36,16 @@ describe("menu filtering and recommendations", () => {
     expect(recommendations.some((item) => item.dietaryFlags.includes("highProtein"))).toBe(true);
   });
 
+  it("keeps high-protein calorie-capped requests focused on meals", () => {
+    const query = "High-protein meal under 650 calories";
+    const constraints = extractConstraintsFromText(query, baseConstraints);
+    const recommendations = recommendItems(constraints, query, 3);
+
+    expect(recommendations.every((item) => item.nutrition.calories <= 650)).toBe(true);
+    expect(recommendations[0].category).not.toBe("Drinks");
+    expect(recommendations[0].nutrition.protein).toBeGreaterThanOrEqual(30);
+  });
+
   it("detects pickup quantities from natural language", () => {
     const cartActions = findRequestedCartItems("Can I order two Harvest Bowls for pickup?");
 

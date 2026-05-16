@@ -7,8 +7,10 @@ import {
   constraintSummary,
   extractConstraintsFromText,
   formatNutrition,
+  getMenuItemById,
+  normalizeText,
 } from "@/lib/menu";
-import type { ChatRequest, CustomerConstraints } from "@/types";
+import type { ChatPresentation, ChatRequest, CustomerConstraints } from "@/types";
 
 export const runtime = "nodejs";
 
@@ -41,6 +43,117 @@ function sourceText() {
   ].join("\n");
 }
 
+export function stripUnsupportedMarkdown(value: string) {
+  return value
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .trim();
+}
+
+function requestedProteinTarget(normalizedText: string) {
+  const match = normalizedText.match(/\b(\d{2,3})\s*(?:g|grams?)\s+(?:of\s+)?protein\b/);
+  return match ? Number(match[1]) : null;
+}
+
+function shouldBuildRecommendationPresentation(
+  userText: string,
+  constraints: CustomerConstraints,
+  suggestedItemIds: string[],
+) {
+  if (suggestedItemIds.length === 0) return false;
+
+  const normalized = normalizeText(userText);
+  const asksOperationalQuestion = /\b(hour|hours|open|location|address|phone)\b/.test(normalized);
+  const asksPickupOnly = /\b(order|pickup|pick up|cart|add|get|buy)\b/.test(normalized);
+  const asksForMenuChoice =
+    /\b(best|option|options|meal|item|recommend|suggest|calorie|calories|macro|macros|protein|carb|carbs|fat|vegetarian|vegan|spicy|allergy|allergen|avoid)\b/.test(
+      normalized,
+    ) ||
+    constraints.nutritionGoal === "highProtein" ||
+    constraints.nutritionGoal === "lowerCalorie" ||
+    constraints.dietaryPrefs.length > 0 ||
+    constraints.allergens.length > 0 ||
+    constraints.avoidIngredients.length > 0;
+
+  if (asksOperationalQuestion && !asksForMenuChoice) return false;
+  if (asksPickupOnly && !asksForMenuChoice) return false;
+
+  return asksForMenuChoice;
+}
+
+function recommendationHeading(constraints: CustomerConstraints) {
+  if (constraints.nutritionGoal === "highProtein") return "Best high-protein matches";
+  if (constraints.nutritionGoal === "lowerCalorie") return "Lowest-calorie matches";
+  if (constraints.allergens.length > 0 || constraints.avoidIngredients.length > 0) return "Allergy-aware matches";
+  if (constraints.dietaryPrefs.includes("vegetarian") || constraints.dietaryPrefs.includes("vegan")) {
+    return "Best vegetarian matches";
+  }
+  return "Best menu matches";
+}
+
+function recommendationReason(constraints: CustomerConstraints, item: NonNullable<ReturnType<typeof getMenuItemById>>) {
+  if (constraints.nutritionGoal === "highProtein") {
+    return `${item.nutrition.protein}g protein for ${item.nutrition.calories} calories.`;
+  }
+  if (constraints.nutritionGoal === "lowerCalorie") {
+    return `${item.nutrition.calories} calories with ${item.nutrition.protein}g protein.`;
+  }
+  if (constraints.allergens.length > 0 || constraints.avoidIngredients.length > 0) {
+    return "Matches your current allergy and ingredient filters.";
+  }
+  if (constraints.dietaryPrefs.length > 0) {
+    return "Matches your current menu preferences.";
+  }
+  return "Recommended from the Berkeley menu data.";
+}
+
+export function buildChatPresentation(
+  userText: string,
+  constraints: CustomerConstraints,
+  suggestedItemIds: string[],
+): ChatPresentation | undefined {
+  if (!shouldBuildRecommendationPresentation(userText, constraints, suggestedItemIds)) return undefined;
+
+  const normalized = normalizeText(userText);
+  const cards = Array.from(new Set(suggestedItemIds))
+    .map(getMenuItemById)
+    .filter((item): item is NonNullable<ReturnType<typeof getMenuItemById>> => Boolean(item))
+    .slice(0, 4)
+    .map((item) => ({
+      menuItemId: item.id,
+      name: item.name,
+      reason: recommendationReason(constraints, item),
+      calories: item.nutrition.calories,
+      protein: item.nutrition.protein,
+      carbs: item.nutrition.carbs,
+      fat: item.nutrition.fat,
+    }));
+
+  if (cards.length === 0) return undefined;
+
+  const notes: string[] = [];
+  const proteinTarget = requestedProteinTarget(normalized);
+  const topProteinCard = [...cards].sort((a, b) => b.protein - a.protein || a.calories - b.calories)[0];
+
+  if (proteinTarget && topProteinCard.protein < proteinTarget) {
+    notes.push(`No listed item reaches ${proteinTarget}g protein; the closest shown is ${topProteinCard.name} at ${topProteinCard.protein}g protein.`);
+  }
+
+  if (constraints.allergens.length > 0) {
+    notes.push("For severe allergies, tell the restaurant team before ordering because shared prep areas can create cross-contact risk.");
+  }
+
+  return {
+    variant: "recommendationCards",
+    heading: recommendationHeading(constraints),
+    cards,
+    notes: notes.length ? notes : undefined,
+  };
+}
+
 async function askOpenAI(userText: string, request: ChatRequest, constraints: CustomerConstraints, localMessage: string) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -57,6 +170,7 @@ async function askOpenAI(userText: string, request: ChatRequest, constraints: Cu
       "Do not invent menu items, prices, availability, medical advice, or real order placement.",
       "If allergies or ingredient restrictions are involved, be conservative and mention shared-prep cross-contact risk.",
       "Pickup orders are mock summaries only; no payment or real Sweetgreen order is placed.",
+      "Do not use Markdown formatting, bold markers, asterisks, tables, or bullet characters.",
     ].join(" "),
     input: [
       sourceText(),
@@ -68,7 +182,7 @@ async function askOpenAI(userText: string, request: ChatRequest, constraints: Cu
       recentMessages,
       `Latest user message: ${userText}`,
       `Deterministic safe recommendation baseline: ${localMessage}`,
-      "Write the final assistant reply in 2-5 short sentences.",
+      "Write the final assistant reply as plain prose. If the baseline contains menu recommendations, use one short summary sentence because structured cards will show the detailed macros.",
     ].join("\n\n"),
   });
 
@@ -103,14 +217,19 @@ export async function POST(request: NextRequest) {
       console.error("OpenAI response failed; falling back to deterministic answer", error);
     }
 
+    message = stripUnsupportedMarkdown(message);
+
     if (constraints.allergens.length > 0 && !message.toLowerCase().includes("cross-contact")) {
       message += " For severe allergies, please tell the restaurant team before ordering because shared prep areas can create cross-contact risk.";
     }
+
+    const presentation = buildChatPresentation(latestUser, constraints, local.suggestedItemIds);
 
     return NextResponse.json({
       message,
       suggestedItemIds: local.suggestedItemIds,
       allergyWarnings: local.allergyWarnings,
+      presentation,
       cartActionSuggestions: local.cartActionSuggestions,
     });
   } catch (error) {

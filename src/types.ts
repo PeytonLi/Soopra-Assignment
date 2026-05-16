@@ -75,9 +75,27 @@ export type CustomerConstraints = {
   nutritionGoal?: "highProtein" | "lowerCalorie" | "balanced";
 };
 
+export type ChatRecommendationCard = {
+  menuItemId: string;
+  name: string;
+  reason: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+
+export type ChatPresentation = {
+  variant: "recommendationCards";
+  heading: string;
+  cards: ChatRecommendationCard[];
+  notes?: string[];
+};
+
 export type ChatMessage = {
   role: "assistant" | "user";
   content: string;
+  presentation?: ChatPresentation;
 };
 
 export type ChatRequest = {
@@ -90,6 +108,7 @@ export type ChatResponse = {
   message: string;
   suggestedItemIds: string[];
   allergyWarnings: string[];
+  presentation?: ChatPresentation;
   cartActionSuggestions?: Array<{
     menuItemId: string;
     quantity: number;

@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import type { TrustedOrderPayload } from "@/lib/orders";
+
 type AnalyticsEvent = {
   session_id: string;
   event_type: string;
@@ -42,4 +44,32 @@ export async function logAnalyticsEvent(event: AnalyticsEvent) {
   });
 
   return { configured: true, error };
+}
+
+export async function savePickupOrder(order: TrustedOrderPayload) {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    return { configured: false, error: null, orderId: null };
+  }
+
+  const { data, error } = await supabase
+    .from("pickup_orders")
+    .insert({
+      session_id: order.sessionId,
+      customer_name: order.customerName,
+      pickup_time: order.pickupTime,
+      status: order.status,
+      items: order.items,
+      total_nutrition: order.totalNutrition,
+      allergy_warnings: order.allergyWarnings,
+      constraints: order.constraints,
+    })
+    .select("id")
+    .single();
+
+  return {
+    configured: true,
+    error,
+    orderId: typeof data?.id === "string" ? data.id : null,
+  };
 }
