@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Database, MessageSquare, ShoppingBag, ShieldAlert } from "lucide-react";
+import { motion } from "motion/react";
 
 type Summary = {
   configured: boolean;
@@ -53,7 +54,12 @@ export function AnalyticsDashboard() {
         <ArrowLeft size={16} />
         Back
       </Link>
-      <section className="dashboard-header">
+      <motion.section
+        className="dashboard-header"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+      >
         <div className="section-title">
           <BarChart3 size={22} />
           <h1>Analytics</h1>
@@ -62,7 +68,7 @@ export function AnalyticsDashboard() {
           <Database size={15} />
           {summary.configured ? "Supabase connected" : "Local fallback"}
         </span>
-      </section>
+      </motion.section>
 
       <section className="metric-grid" aria-live="polite">
         <Metric icon={<BarChart3 size={20} />} label="Events" value={loading ? "-" : summary.totalEvents} />
@@ -72,7 +78,12 @@ export function AnalyticsDashboard() {
       </section>
 
       <section className="dashboard-grid">
-        <div className="dashboard-panel">
+        <motion.div
+          className="dashboard-panel"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12, duration: 0.34 }}
+        >
           <h2>Top categories</h2>
           {summary.topCategories.length ? (
             <ul className="compact-list">
@@ -86,8 +97,13 @@ export function AnalyticsDashboard() {
           ) : (
             <p className="muted-text">No category events yet.</p>
           )}
-        </div>
-        <div className="dashboard-panel">
+        </motion.div>
+        <motion.div
+          className="dashboard-panel"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18, duration: 0.34 }}
+        >
           <h2>Recent events</h2>
           {summary.recentEvents.length ? (
             <ul className="compact-list">
@@ -101,7 +117,7 @@ export function AnalyticsDashboard() {
           ) : (
             <p className="muted-text">No events recorded.</p>
           )}
-        </div>
+        </motion.div>
       </section>
       {summary.error ? <p className="error-text">{summary.error}</p> : null}
     </main>
@@ -110,10 +126,15 @@ export function AnalyticsDashboard() {
 
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
   return (
-    <div className="metric-tile">
+    <motion.div
+      className="metric-tile"
+      initial={{ opacity: 0, y: 16, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileHover={{ y: -3 }}
+    >
       <span className="metric-icon">{icon}</span>
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
+    </motion.div>
   );
 }

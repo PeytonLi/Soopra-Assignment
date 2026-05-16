@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { ArrowLeft, QrCode } from "lucide-react";
+import { motion } from "motion/react";
 
 export function QrAccess({ appUrl }: { appUrl: string }) {
   return (
@@ -11,7 +12,12 @@ export function QrAccess({ appUrl }: { appUrl: string }) {
         <ArrowLeft size={16} />
         Back
       </Link>
-      <section className="qr-panel">
+      <motion.section
+        className="qr-panel"
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+      >
         <div className="section-title">
           <QrCode size={22} />
           <h1>QR Access</h1>
@@ -22,7 +28,7 @@ export function QrAccess({ appUrl }: { appUrl: string }) {
         <a href={appUrl} className="url-pill">
           {appUrl}
         </a>
-      </section>
+      </motion.section>
     </main>
   );
 }

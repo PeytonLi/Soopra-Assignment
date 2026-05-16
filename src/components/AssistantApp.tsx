@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useMemo, useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import {
   AlertTriangle,
   Clock,
@@ -240,7 +241,12 @@ export function AssistantApp() {
 
   return (
     <main className="app-shell">
-      <section className="business-strip">
+      <motion.section
+        className="business-strip"
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      >
         <div>
           <span className="eyebrow">Sweetgreen Berkeley</span>
           <h1>AI pickup assistant</h1>
@@ -259,7 +265,7 @@ export function AssistantApp() {
             QR
           </Link>
         </div>
-      </section>
+      </motion.section>
 
       <section className="workspace-grid">
         <div className="chat-column">
@@ -269,25 +275,48 @@ export function AssistantApp() {
               <h2>Assistant</h2>
             </div>
             <div className="message-list" aria-live="polite">
-              {messages.map((message, index) => (
-                <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                  <p>{message.content}</p>
-                </article>
-              ))}
-              {pending ? (
-                <article className="message assistant">
-                  <p>Checking the menu data...</p>
-                </article>
-              ) : null}
+              <AnimatePresence initial={false}>
+                {messages.map((message, index) => (
+                  <motion.article
+                    layout
+                    key={`${message.role}-${index}`}
+                    className={`message ${message.role}`}
+                    initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <p>{message.content}</p>
+                  </motion.article>
+                ))}
+                {pending ? (
+                  <motion.article
+                    layout
+                    key="pending"
+                    className="message assistant pending-message"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                  >
+                    <p>Checking the menu data...</p>
+                  </motion.article>
+                ) : null}
+              </AnimatePresence>
             </div>
 
             {suggestedItems.length ? (
               <div className="suggestion-row" aria-label="Suggested menu items">
                 {suggestedItems.slice(0, 4).map((item) => (
-                  <button key={item.id} className="suggestion-chip" onClick={() => addItemToCart(item)}>
+                  <motion.button
+                    key={item.id}
+                    className="suggestion-chip"
+                    onClick={() => addItemToCart(item)}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
                     <Plus size={14} />
                     {item.name}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             ) : null}
@@ -306,9 +335,15 @@ export function AssistantApp() {
 
             <div className="quick-prompts">
               {quickPrompts.map((prompt) => (
-                <button key={prompt} onClick={() => void handleSubmit(undefined, prompt)} disabled={pending}>
+                <motion.button
+                  key={prompt}
+                  onClick={() => void handleSubmit(undefined, prompt)}
+                  disabled={pending}
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                >
                   {prompt}
-                </button>
+                </motion.button>
               ))}
             </div>
           </div>
@@ -401,29 +436,54 @@ export function AssistantApp() {
               <h2>Pickup cart</h2>
             </div>
             {cart.length ? (
-              <div className="cart-list">
-                {cart.map((cartItem) => {
-                  const item = getMenuItemById(cartItem.menuItemId);
-                  if (!item) return null;
-                  return (
-                    <div key={cartItem.menuItemId} className="cart-line">
-                      <div>
-                        <strong>{item.name}</strong>
-                        <span>{formatNutrition(item)}</span>
-                      </div>
-                      <div className="stepper" aria-label={`Quantity for ${item.name}`}>
-                        <button onClick={() => updateQuantity(item.id, -1)} aria-label="Decrease quantity">
-                          <Minus size={14} />
-                        </button>
-                        <span>{cartItem.quantity}</span>
-                        <button onClick={() => updateQuantity(item.id, 1)} aria-label="Increase quantity">
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <LayoutGroup>
+                <div className="cart-list">
+                  <AnimatePresence initial={false}>
+                    {cart.map((cartItem) => {
+                      const item = getMenuItemById(cartItem.menuItemId);
+                      if (!item) return null;
+                      return (
+                        <motion.div
+                          layout
+                          key={cartItem.menuItemId}
+                          className="cart-line"
+                          initial={{ opacity: 0, x: 18, scale: 0.98 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={{ opacity: 0, x: 18, scale: 0.98 }}
+                        >
+                          <div>
+                            <strong>{item.name}</strong>
+                            <span>{formatNutrition(item)}</span>
+                          </div>
+                          <div className="stepper" aria-label={`Quantity for ${item.name}`}>
+                            <motion.button
+                              onClick={() => updateQuantity(item.id, -1)}
+                              aria-label="Decrease quantity"
+                              whileTap={{ scale: 0.9 }}
+                            >
+                              <Minus size={14} />
+                            </motion.button>
+                            <motion.span
+                              key={`${item.id}-${cartItem.quantity}`}
+                              initial={{ y: 8, opacity: 0 }}
+                              animate={{ y: 0, opacity: 1 }}
+                            >
+                              {cartItem.quantity}
+                            </motion.span>
+                            <motion.button
+                              onClick={() => updateQuantity(item.id, 1)}
+                              aria-label="Increase quantity"
+                              whileTap={{ scale: 0.9 }}
+                            >
+                              <Plus size={14} />
+                            </motion.button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </LayoutGroup>
             ) : (
               <p className="muted-text">No items yet.</p>
             )}
@@ -444,7 +504,12 @@ export function AssistantApp() {
             </div>
 
             {pickupSummary ? (
-              <div className="summary-box">
+              <motion.div
+                className="summary-box"
+                initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              >
                 <h3>Pickup summary</h3>
                 <p>
                   {pickupSummary.customerName} · {pickupSummary.pickupTime}
@@ -462,7 +527,7 @@ export function AssistantApp() {
                   <AlertTriangle size={14} />
                   Mock pickup only. No payment or real restaurant order was placed.
                 </p>
-              </div>
+              </motion.div>
             ) : null}
           </section>
 
@@ -510,10 +575,10 @@ export function AssistantApp() {
 
 function MenuMini({ item, onAdd }: { item: MenuItem; onAdd: () => void }) {
   return (
-    <button className="mini-menu-item" onClick={onAdd}>
+    <motion.button className="mini-menu-item" onClick={onAdd} whileHover={{ x: 4 }} whileTap={{ scale: 0.98 }}>
       <span>{item.name}</span>
       <strong>{item.nutrition.protein}g protein</strong>
-    </button>
+    </motion.button>
   );
 }
 
@@ -522,7 +587,11 @@ function MenuCard({ item, constraints, onAdd }: { item: MenuItem; constraints: C
   const blocked = warnings.length > 0;
 
   return (
-    <article className={blocked ? "menu-card blocked" : "menu-card"}>
+    <motion.article
+      className={blocked ? "menu-card blocked" : "menu-card"}
+      whileHover={blocked ? undefined : { y: -5 }}
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="menu-card-header">
         <span className="category-label">{item.category}</span>
         <div className="flag-row">
@@ -554,10 +623,10 @@ function MenuCard({ item, constraints, onAdd }: { item: MenuItem; constraints: C
         {item.allergens.length ? item.allergens.map((allergen) => <span key={allergen}>{formatAllergen(allergen)}</span>) : <span>no top-9 flagged</span>}
       </div>
       {blocked ? <p className="blocked-note">{warnings.join(" ")}</p> : null}
-      <button className="add-button" onClick={onAdd} disabled={blocked}>
+      <motion.button className="add-button" onClick={onAdd} disabled={blocked} whileTap={{ scale: 0.98 }}>
         <Plus size={16} />
         Add
-      </button>
-    </article>
+      </motion.button>
+    </motion.article>
   );
 }
